@@ -1,0 +1,27 @@
+(() => {
+
+
+  const style = document.createElement('style');
+  style.textContent = `.taxonomy-grid{display:grid;grid-template-columns:1fr 1fr;gap:30px}.taxonomy-grid h3{font-size:13px;margin:0 0 12px}.taxonomy-row{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--l)}.taxonomy-row span{flex:1}.taxonomy-row small{color:var(--m)}@media(max-width:700px){.taxonomy-grid{grid-template-columns:1fr}}`;
+  document.head.append(style);
+
+  const menuDialog = document.createElement('dialog');
+  menuDialog.id = 'taxonomyManager';
+  menuDialog.innerHTML = `<div class="inner"><div class="head"><h2>Admin</h2><button class="close" type="button">×</button></div><div class="taxonomy-grid"><section><h3>1차 메뉴</h3><div id="sectionList"></div><form id="sectionForm" class="actions" style="justify-content:stretch"><input id="sectionName" placeholder="예: Portfolio" maxlength="40" required><button class="btn primary">추가</button></form></section><section><h3>2차 메뉴</h3><select id="categoryParent"></select><div id="childCategoryList"></div><form id="childCategoryForm" class="actions" style="justify-content:stretch"><input id="childCategoryName" placeholder="하위 카테고리 이름" maxlength="40" required><button class="btn primary">추가</button></form></section></div></div>`;
+  document.body.append(menuDialog);
+  menuDialog.querySelector('.close').onclick = () => menuDialog.close();
+
+  async function loadTaxonomy() { await refresh(); }
+  function drawManager() {
+    $('#sectionList').innerHTML = sections.map(section => `<div class="taxonomy-row"><span>${esc(section.name)}</span><button class="btn" data-edit-section="${section.id}">수정</button><button class="btn danger" data-delete-section="${section.id}">삭제</button></div>`).join('');
+    $('#categoryParent').innerHTML = sections.map(section => `<option value="${section.id}">${esc(section.name)}</option>`).join('');
+    if (sections.some(section => section.id === 'archive')) $('#categoryParent').value = 'archive';
+    const drawChildren = () => { const parent = $('#categoryParent').value; $('#childCategoryList').innerHTML = cats.filter(category => category.parentId === parent).map(category => `<div class="taxonomy-row"><span>${esc(category.name)}</span><button class="btn" data-edit-child="${category.id}">수정</button><button class="btn danger" data-delete-child="${category.id}">삭제</button></div>`).join('') || '<p style="color:var(--m);font-size:12px">하위 메뉴가 없습니다.</p>'; document.querySelectorAll('[data-edit-child]').forEach(button => button.onclick = async () => { const category = cats.find(item => item.id === button.dataset.editChild); const name = prompt('하위 메뉴 이름', category.name); if (!name || !name.trim()) return; const response = await fetch('/api/categories/' + category.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), parentId: $('#categoryParent').value }) }); if (!response.ok) return alert((await response.json()).error); await loadTaxonomy(); drawManager(); }); document.querySelectorAll('[data-delete-child]').forEach(button => button.onclick = async () => { const response = await fetch('/api/categories/' + button.dataset.deleteChild, { method: 'DELETE' }); if (!response.ok) return alert((await response.json()).error); await loadTaxonomy(); drawManager(); }); };
+    $('#categoryParent').onchange = drawChildren; drawChildren();
+    document.querySelectorAll('[data-edit-section]').forEach(button => button.onclick = async () => { const section = sections.find(item => item.id === button.dataset.editSection); const name = prompt('1차 메뉴 이름', section.name); if (!name || !name.trim()) return; const response = await fetch('/api/sections/' + section.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); if (!response.ok) return alert((await response.json()).error); await loadTaxonomy(); drawManager(); });
+    document.querySelectorAll('[data-delete-section]').forEach(button => button.onclick = async () => { const id = button.dataset.deleteSection; const section = sections.find(item => item.id === id); if (section?.locked) return alert('기본 메뉴는 삭제할 수 없습니다.'); if (cats.some(category => (category.parentId || 'archive') === id) || posts.some(post => post.category === id || post.sectionId === id)) return alert('하위 카테고리나 글이 남아 있습니다. 먼저 이동하거나 삭제한 후 메뉴를 삭제해 주세요.'); const response = await fetch('/api/sections/' + button.dataset.deleteSection, { method: 'DELETE' }); if (!response.ok) return alert((await response.json()).error); await loadTaxonomy(); drawManager(); });
+  }
+  $('#sectionForm').onsubmit = async event => { event.preventDefault(); const response = await fetch('/api/sections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('#sectionName').value }) }); if (!response.ok) return alert((await response.json()).error); $('#sectionForm').reset(); await loadTaxonomy(); drawManager(); };
+  $('#childCategoryForm').onsubmit = async event => { event.preventDefault(); const response = await fetch('/api/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('#childCategoryName').value, parentId: $('#categoryParent').value }) }); if (!response.ok) return alert((await response.json()).error); $('#childCategoryForm').reset(); await loadTaxonomy(); drawManager(); };
+  window.openTaxonomyManager = () => { drawManager(); menuDialog.showModal(); };
+})();

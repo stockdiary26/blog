@@ -1,0 +1,1 @@
+{"name":"memoir-blog","private":true,"scripts":{"start":"node server-blocks.js"}}
