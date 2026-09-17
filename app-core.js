@@ -1,6 +1,17 @@
 // Shared state and the only list renderer / refresh / navigation entry points.
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+function normalizeImageAddress(value) {
+  let address = String(value || '').trim();
+  if (!address) throw new Error('이미지 주소를 입력하거나 빈 이미지 블록을 삭제하세요.');
+  if (/^(?:[a-z]:[\\/]|file:)/i.test(address)) throw new Error('컴퓨터의 이미지 파일은 + 이미지 버튼으로 업로드하세요.');
+  if (address.startsWith('//')) address = 'https:' + address;
+  else if (/^(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:[/?#]|$)/i.test(address)) address = 'https://' + address;
+  let url;
+  try { url = new URL(address); } catch { throw new Error('이미지 주소를 확인하세요. https://로 시작하는 이미지 주소를 입력하세요.'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('http 또는 https 이미지 주소를 입력하세요.');
+  return url.href;
+}
 let posts = [], cats = [], sections = [], selected = null;
 let auth = { configured: false, authenticated: false };
 let openPost;

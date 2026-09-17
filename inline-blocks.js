@@ -29,8 +29,18 @@
   function drawBlocks() {
     editor.innerHTML = blocks.map((block, index) => {
       if (block.type === 'text') return `<div class="post-block"><label>문단</label><textarea data-text-block="${index}" placeholder="내용을 입력하세요.">${escapeHtml(block.content || '')}</textarea><div class="block-tools"><button type="button" class="btn block-remove" data-remove-block="${index}">삭제</button><button type="button" class="btn" data-insert-text="${index}">아래에 문단</button><button type="button" class="btn" data-insert-image="${index}">아래에 이미지</button></div></div>`;
-      return `<div class="post-block post-image"><label>이미지</label><img src="${block.preview || block.mediaUrl}" alt=""><div class="block-tools"><button type="button" class="btn block-remove" data-remove-block="${index}">삭제</button><button type="button" class="btn" data-insert-text="${index}">아래에 문단</button><button type="button" class="btn" data-insert-image="${index}">아래에 이미지</button></div></div>`;
-    }).join('') + `<div class="block-tools"><button type="button" class="btn" data-add-text>+ 문단</button><button type="button" class="btn" data-add-image>+ 이미지</button></div>`;
+      return `<div class="post-block post-image"><label>이미지</label>${block.external ? `<input type="text" data-image-url="${index}" aria-label="이미지 주소" placeholder="https://example.com/photo.jpg" value="${escapeHtml(block.mediaUrl || '')}">` : ''}<img src="${escapeHtml(block.preview || block.mediaUrl)}" alt=""><div class="block-tools"><button type="button" class="btn block-remove" data-remove-block="${index}">삭제</button><button type="button" class="btn" data-insert-text="${index}">아래에 문단</button><button type="button" class="btn" data-insert-image="${index}">아래에 이미지</button></div></div>`;
+    }).join('') + `<div class="block-tools"><button type="button" class="btn" data-add-text>+ 문단</button><button type="button" class="btn" data-add-image>+ 이미지</button><button type="button" class="btn" data-add-image-url>+ 이미지 주소</button></div>`;
+    editor.querySelectorAll('[data-image-url]').forEach(input => {
+      input.oninput = () => {
+        const block = blocks[Number(input.dataset.imageUrl)];
+        block.mediaUrl = input.value.trim();
+        const image = input.parentElement.querySelector('img');
+        try { image.src = normalizeImageAddress(block.mediaUrl); input.setCustomValidity(''); }
+        catch (error) { image.removeAttribute('src'); input.setCustomValidity(error.message); }
+      };
+    });
+    editor.querySelector('[data-add-image-url]').onclick = () => { blocks.push({ type: 'image', external: true, mediaUrl: '' }); drawBlocks(); };
     editor.querySelectorAll('[data-text-block]').forEach(textarea => {
       textarea.oninput = () => { blocks[Number(textarea.dataset.textBlock)].content = textarea.value; };
     });
@@ -95,7 +105,7 @@
     if (post) {
       $('#postTitle').value = post.title;
       $('#postCategory').value = post.category;
-      blocks = legacyBlocks(post).map(block => ({ ...block, preview: block.mediaUrl }));
+      blocks = legacyBlocks(post).filter(block => block.type !== 'image' || block.mediaUrl || block.media?.data).map(block => ({ ...block, preview: block.mediaUrl, external: /^https?:\/\//i.test(block.mediaUrl || '') }));
     } else {
       blocks = [{ type: 'text', content: '' }];
     }
@@ -111,20 +121,32 @@
     submitButton.disabled = true;
     submitButton.textContent = '저장 중…';
     try {
+      editor.querySelectorAll('[data-image-url]').forEach(input => { blocks[Number(input.dataset.imageUrl)].mediaUrl = input.value.trim(); });
       const preparedBlocks = [];
       for (const block of blocks) {
         if (block.type === 'text') {
           if (block.content.trim()) preparedBlocks.push({ type: 'text', content: block.content });
         } else {
-          const data = block.media?.data || await asDataUrl(block.mediaUrl);
-          preparedBlocks.push({ type: 'image', media: { data } });
+          if (block.external) {
+            preparedBlocks.push({ type: 'image', mediaUrl: normalizeImageAddress(block.mediaUrl) });
+          } else if (block.media?.data) {
+            preparedBlocks.push({ type: 'image', media: { data: block.media.data } });
+          } else {
+            preparedBlocks.push({ type: 'image', mediaUrl: block.mediaUrl });
+          }
         }
       }
       if (!preparedBlocks.length) return alert('내용을 입력하거나 이미지를 추가하세요.');
       const id = $('#postId').value;
       const payload = { category: $('#postCategory').value, title: $('#postTitle').value, blocks: preparedBlocks };
+      const capabilities = await fetch('/api/capabilities', { cache: 'no-store' });
+      if (!capabilities.ok || !(await capabilities.json()).imageUrls) throw new Error('실행 중인 서버가 이전 버전입니다. restart-blog.cmd로 재시작해주세요. 입력한 내용은 이 창에 유지됩니다.');
       const response = await fetch(id ? '/api/posts/' + id : '/api/posts', { method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!response.ok) return alert((await response.json()).error);
+      const saved = await response.json();
+      const expectedImages = preparedBlocks.filter(block => block.type === 'image');
+      const savedImages = (saved.blocks || []).filter(block => block.type === 'image' && block.mediaUrl);
+      if (savedImages.length !== expectedImages.length) throw new Error('실행 중인 서버가 이미지 주소를 저장하지 못했습니다. 서버 창을 닫고 start-blog.cmd를 다시 실행한 뒤 이 창에서 저장을 다시 눌러주세요.');
       dialog('editor').close();
       refresh();
     } catch (error) {

@@ -39,7 +39,11 @@ const readBody = req => new Promise((resolve, reject) => {
 const getAdmin = () => fs.existsSync(adminFile) ? read(adminFile) : null;
 const cookie = (req, name) => (req.headers.cookie || '').split(';').map(x => x.trim()).find(x => x.startsWith(name + '='))?.split('=')[1];
 const authenticated = req => sessions.has(cookie(req, 'memoir_session'));
-const guard = (req, res) => authenticated(req) || !(send(res, 401, { error: 'Admin login required' }));
+const guard = (req, res) => {
+  if (authenticated(req)) return true;
+  send(res, 401, { error: 'Admin login required' });
+  return false;
+};
 const hash = password => { const salt = crypto.randomBytes(16).toString('hex'); return { salt, hash: crypto.scryptSync(password, salt, 64).toString('hex') }; };
 const verify = (password, account) => crypto.timingSafeEqual(Buffer.from(account.hash, 'hex'), crypto.scryptSync(password, account.salt, 64));
 const beginSession = res => {
@@ -64,14 +68,15 @@ function storeMedia(media) {
 }
 
 function removeMedia(item) {
-  if (!item?.mediaUrl) return;
+  if (!/^\/uploads\/[a-zA-Z0-9-]+\.(jpg|png|gif|webp|mp4|webm)$/.test(item?.mediaUrl || '')) return;
   const file = path.join(uploads, path.basename(item.mediaUrl));
   if (fs.existsSync(file)) fs.unlinkSync(file);
 }
 
-function removePostMedia(post) {
+function removePostMedia(post, retained = {}) {
+  const keep = new Set([retained.mediaUrl, ...(retained.blocks || []).map(block => block.mediaUrl)]);
   const urls = new Set([post.mediaUrl, ...(post.blocks || []).filter(block => block.type === 'image').map(block => block.mediaUrl)]);
-  urls.forEach(mediaUrl => removeMedia({ mediaUrl }));
+  urls.forEach(mediaUrl => { if (!keep.has(mediaUrl)) removeMedia({ mediaUrl }); });
 }
 
 async function makePost(input, existing = {}) {
@@ -81,7 +86,15 @@ async function makePost(input, existing = {}) {
   let blocks;
   if (Array.isArray(input.blocks)) {
     blocks = input.blocks.map(block => {
-      if (block.type === 'image') return { type: 'image', ...storeMedia(block.media) };
+      if (block.type === 'image') {
+        if (block.media?.data) return { type: 'image', ...storeMedia(block.media) };
+        const value = String(block.mediaUrl || '').trim();
+        if (/^\/uploads\/[a-zA-Z0-9-]+\.(jpg|png|gif|webp)$/.test(value) && (existing.mediaUrl === value || (existing.blocks || []).some(item => item.type === 'image' && item.mediaUrl === value))) return { type: 'image', mediaUrl: value, mediaType: 'image/*' };
+        let url;
+        try { url = new URL(value); } catch { throw Error('올바른 이미지 주소를 입력하세요.'); }
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw Error('http 또는 https 이미지 주소를 입력하세요.');
+        return { type: 'image', mediaUrl: url.href, mediaType: 'image/*' };
+      }
       const content = String(block.content || '');
       return content.trim() ? { type: 'text', content } : null;
     }).filter(Boolean);
@@ -102,6 +115,7 @@ async function makePost(input, existing = {}) {
 http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://local');
+    if (req.method === 'GET' && url.pathname === '/api/capabilities') return send(res, 200, { imageUrls: true, version: 'image-url-edit-v2' });
     const postMatch = url.pathname.match(/^\/api\/posts\/([^/]+)$/);
     const categoryMatch = url.pathname.match(/^\/api\/categories\/([^/]+)$/);
     const sectionMatch = url.pathname.match(/^\/api\/sections\/([^/]+)$/);
@@ -117,6 +131,18 @@ http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/auth/login') {
       const input = await readBody(req), account = getAdmin();
       if (!account || input.username !== account.username || !verify(String(input.password || ''), account)) return send(res, 401, { error: '아이디 또는 비밀번호가 올바르지 않습니다.' });
+      return beginSession(res);
+    }
+    if (req.method === 'POST' && url.pathname === '/api/auth/password') {
+      if (!guard(req, res)) return;
+      const input = await readBody(req), account = getAdmin();
+      if (!account || !verify(String(input.currentPassword || ''), account)) return send(res, 400, { error: '현재 비밀번호가 올바르지 않습니다.' });
+      const password = String(input.newPassword || '');
+      if (password.length < 10 || password.length > 256) return send(res, 400, { error: '새 비밀번호는 10~256자로 입력하세요.' });
+      if (password !== input.confirmPassword) return send(res, 400, { error: '새 비밀번호 확인이 일치하지 않습니다.' });
+      if (verify(password, account)) return send(res, 400, { error: '현재 비밀번호와 다른 비밀번호를 입력하세요.' });
+      write(adminFile, { username: account.username, ...hash(password) });
+      sessions.clear();
       return beginSession(res);
     }
     if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
@@ -185,7 +211,7 @@ http.createServer(async (req, res) => {
     if (postMatch && req.method === 'PUT') {
       if (!guard(req, res)) return;
       const input = await readBody(req), posts = read(postsFile), index = posts.findIndex(post => post.id === postMatch[1]); if (index < 0) return send(res, 404, {});
-      const previous = posts[index]; const post = await makePost(input, { ...previous }); posts[index] = post; write(postsFile, posts); removePostMedia(previous); return send(res, 200, post);
+      const previous = posts[index]; const post = await makePost(input, { ...previous }); posts[index] = post; write(postsFile, posts); removePostMedia(previous, post); return send(res, 200, post);
     }
     if (postMatch && req.method === 'DELETE') {
       if (!guard(req, res)) return;

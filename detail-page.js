@@ -34,8 +34,8 @@
     selected = postId;
     const body = postBlocks(post).map(block => {
       if (block.type === 'text') return `<p class="detail-block-text">${linkifyPostText(block.content)}</p>`;
-      if (block.type === 'video') return `<video class="detail-block-video" controls src="${block.mediaUrl}"></video>`;
-      return `<img class="detail-block-image" src="${block.mediaUrl}" alt="">`;
+      if (block.type === 'video') return `<video class="detail-block-video" controls src="${escapeHtml(block.mediaUrl)}"></video>`;
+      return `<img class="detail-block-image" src="${escapeHtml(block.mediaUrl)}" alt="">`;
     }).join('');
     $('#app').innerHTML = `<div class="detail-page"><aside class="detail-sidebar"><div class="detail-sidebar-list">${categorySidebar()}</div></aside><article class="detail-article"><div class="detail-meta">${escapeHtml(name(post.category))} · ${post.date}</div><h1>${escapeHtml(post.title)}</h1>${body}${auth.authenticated ? '<button class="btn detail-edit" data-detail-edit>수정</button>' : ''}</article></div>`;
     const edit = $('[data-detail-edit]');
