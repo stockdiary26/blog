@@ -1,0 +1,12 @@
+[
+  {
+    "id": "diary",
+    "name": "Diary",
+    "locked": true
+  },
+  {
+    "id": "archive",
+    "name": "Archive",
+    "locked": true
+  }
+]

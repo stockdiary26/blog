@@ -1,0 +1,9 @@
+Options -Indexes
+DirectoryIndex index.html
+RewriteEngine On
+RewriteRule ^(?:_private|data|tests)(?:/|$) - [F,L]
+RewriteRule ^(?:preview\.php|router\.php|README.*|.*\.(?:json|log|cmd|ps1))$ - [F,L,NC]
+RewriteRule ^api(?:/.*)?$ api.php [QSA,L]
+<FilesMatch "^\.">
+  Require all denied
+</FilesMatch>

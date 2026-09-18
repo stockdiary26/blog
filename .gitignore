@@ -6,3 +6,11 @@ data/admin.json
 *.log
 .DS_Store
 Thumbs.db
+
+cafe24/_private/admin.json
+cafe24/_private/setup-key.json
+cafe24/_private/login-attempts.json
+cafe24/_private/store.lock
+cafe24/_private/write-*
+
+dist/
